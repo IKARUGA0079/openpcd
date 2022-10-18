@@ -7,6 +7,7 @@ import open3d
 import torch
 import matplotlib
 import numpy as np
+from pcdet.models import load_data_to_gpu
 
 box_colormap = [
     [1, 1, 1],
@@ -72,6 +73,55 @@ def draw_scenes(points, gt_boxes=None, ref_boxes=None, ref_labels=None, ref_scor
     vis.run()
     vis.destroy_window()
 
+
+def draw_continuous_scenes(demo_dataset, logger, model, gt_boxes=None, ref_boxes=None, ref_labels=None, ref_scores=None, point_colors=None, draw_origin=True):
+    for idx, data_dict in enumerate(demo_dataset):
+        logger.info(f'Visualized sample index: \t{idx + 1}')
+        data_dict = demo_dataset.collate_batch([data_dict])
+        load_data_to_gpu(data_dict)
+        pred_dicts, _ = model.forward(data_dict)
+
+        points = data_dict['points'][:, 1:]
+        ref_boxes = pred_dicts[0]['pred_boxes']
+        ref_scores = pred_dicts[0]['pred_scores']
+        ref_labels = pred_dicts[0]['pred_labels']
+
+        if isinstance(points, torch.Tensor):
+            points = points.cpu().numpy()
+        if isinstance(gt_boxes, torch.Tensor):
+            gt_boxes = gt_boxes.cpu().numpy()
+        if isinstance(ref_boxes, torch.Tensor):
+            ref_boxes = ref_boxes.cpu().numpy()
+
+        vis = open3d.visualization.Visualizer()  # 添加参数可设置相机角度
+        vis.create_window()
+
+        vis.get_render_option().point_size = 1.0
+        vis.get_render_option().background_color = np.zeros(3)
+
+        # draw origin
+        if draw_origin:
+            axis_pcd = open3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0, origin=[0, 0, 0])
+            vis.add_geometry(axis_pcd)
+
+        pts = open3d.geometry.PointCloud()
+        pts.points = open3d.utility.Vector3dVector(points[:, :3])
+
+        vis.update_geometry(pts)
+        #与前面相同的代码块，可以抽象成函数复用
+        if point_colors is None:
+            pts.colors = open3d.utility.Vector3dVector(np.ones((points.shape[0], 3)))
+        else:
+            pts.colors = open3d.utility.Vector3dVector(point_colors)
+
+        if gt_boxes is not None:
+            vis = draw_box(vis, gt_boxes, (0, 0, 1))
+
+        if ref_boxes is not None:
+            vis = draw_box(vis, ref_boxes, (0, 1, 0), ref_labels, ref_scores)
+
+        vis.poll_events()
+        vis.update_renderer()
 
 def translate_boxes_to_open3d_instance(gt_boxes):
     """
